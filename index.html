@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1505,6 +1504,72 @@
             document.getElementById('downloadReport').addEventListener('click', exportToPDF);
         }
 
+        // Calculate ecosystem health score
+        function calculateEcosystemHealth() {
+            // 40% Weight: Latest assessment score
+            let assessmentScore = 0;
+            if (db.assessments.length > 0) {
+                const latestAssessment = db.assessments.reduce((prev, current) => 
+                    (new Date(prev.date) > new Date(current.date)) ? prev : current
+                );
+                
+                // Convert health rating to numerical value
+                switch(latestAssessment.health) {
+                    case 'excellent': assessmentScore = 100; break;
+                    case 'good': assessmentScore = 80; break;
+                    case 'fair': assessmentScore = 60; break;
+                    case 'poor': assessmentScore = 40; break;
+                    case 'degraded': assessmentScore = 20; break;
+                    default: assessmentScore = 50;
+                }
+            }
+            
+            // 30% Weight: Invasive species/weeds (deduct 10 points per weed/pest species)
+            let invasivePenalty = 0;
+            const invasiveSpecies = db.species.filter(s => 
+                s.status === 'weed' || s.status === 'pest' || s.type === 'weed' || s.type === 'pest'
+            );
+            invasivePenalty = Math.min(30, invasiveSpecies.length * 10); // Max penalty of 30
+            
+            // 20% Weight: Completed maintenance tasks (percentage of completed vs. total tasks)
+            let maintenanceScore = 0;
+            if (db.activities.length > 0) {
+                const completedTasks = db.activities.filter(a => a.status === 'completed').length;
+                const totalTasks = db.activities.length;
+                maintenanceScore = (completedTasks / totalTasks) * 20;
+            }
+            
+            // 10% Weight: Recent monitoring logs (positive findings add points)
+            let monitoringScore = 0;
+            if (db.monitoring.length > 0) {
+                // Simple scoring - each monitoring log adds 1 point, max 10
+                const recentMonitoring = db.monitoring
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .slice(0, 10); // Only consider last 10 logs
+                
+                monitoringScore = Math.min(10, recentMonitoring.length);
+            }
+            
+            // Calculate total score (0-100)
+            const totalScore = Math.round(
+                (assessmentScore * 0.4) + // 40% of assessment score
+                (30 - invasivePenalty) + // 30% base minus penalty (max 30)
+                maintenanceScore +        // 20% from maintenance
+                monitoringScore           // 10% from monitoring
+            );
+            
+            return Math.max(0, Math.min(100, totalScore)); // Ensure score is between 0-100
+        }
+
+        // Get health status display properties
+        function getHealthStatus(score) {
+            if (score >= 90) return { text: 'Excellent', class: 'bg-success', icon: 'bi-emoji-smile' };
+            if (score >= 70) return { text: 'Good', class: 'bg-success', icon: 'bi-emoji-smile' };
+            if (score >= 50) return { text: 'Fair', class: 'bg-warning', icon: 'bi-emoji-neutral' };
+            if (score >= 30) return { text: 'Poor', class: 'bg-danger', icon: 'bi-emoji-frown' };
+            return { text: 'Degraded', class: 'bg-danger', icon: 'bi-emoji-dizzy' };
+        }
+
         // Load dashboard data
         function loadDashboard() {
             // Upcoming tasks
@@ -1535,6 +1600,38 @@
                     upcomingTasksList.appendChild(taskEl);
                 });
             }
+            
+            // Site Health Status
+            const healthScore = calculateEcosystemHealth();
+            const healthStatus = getHealthStatus(healthScore);
+            
+            // Count data sources for footnote
+            const assessmentCount = db.assessments.length;
+            const invasiveCount = db.species.filter(s => 
+                s.status === 'weed' || s.status === 'pest' || s.type === 'weed' || s.type === 'pest'
+            ).length;
+            const taskCount = db.activities.length;
+            
+            const healthIndicators = document.getElementById('healthIndicators');
+            healthIndicators.innerHTML = `
+                <div class="d-flex align-items-center mb-2">
+                    <div class="display-4 me-3">${healthScore}</div>
+                    <div>
+                        <span class="badge ${healthStatus.class}">${healthStatus.text}</span>
+                        <i class="bi ${healthStatus.icon} ms-1"></i>
+                    </div>
+                </div>
+                <div class="progress mb-2" style="height: 20px;">
+                    <div class="progress-bar ${healthStatus.class}" role="progressbar" 
+                         style="width: ${healthScore}%" aria-valuenow="${healthScore}" 
+                         aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <small class="text-muted">
+                    Based on ${assessmentCount} assessment${assessmentCount !== 1 ? 's' : ''}, 
+                    ${invasiveCount} weed/pest species, 
+                    and ${taskCount} task${taskCount !== 1 ? 's' : ''}.
+                </small>
+            `;
             
             // Recent observations
             const recentObservations = db.monitoring
