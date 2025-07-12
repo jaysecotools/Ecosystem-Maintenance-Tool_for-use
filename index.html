@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -41,6 +42,7 @@
             background-color: #e9ecef;
             border-radius: 5px;
             margin-bottom: 20px;
+            position: relative;
         }
         #map { 
             height: 100%;
@@ -52,6 +54,10 @@
             top: 10px;
             right: 10px;
             z-index: 1000;
+            background: white;
+            padding: 5px;
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
         }
         .leaflet-top.leaflet-right {
             margin-top: 50px;
@@ -87,6 +93,28 @@
             max-width: 100%;
             max-height: 200px;
             margin-top: 10px;
+            display: none;
+        }
+        .drawing-controls {
+            position: absolute;
+            top: 60px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 5px;
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+        .marker-form {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            width: 300px;
             display: none;
         }
     </style>
@@ -202,6 +230,36 @@
                                                     <button id="zoneToggle" class="btn btn-sm btn-outline-primary active">Zones</button>
                                                     <button id="vegetationToggle" class="btn btn-sm btn-outline-success">Vegetation</button>
                                                     <button id="weedsToggle" class="btn btn-sm btn-outline-danger">Weeds</button>
+                                                </div>
+                                            </div>
+                                            <div class="drawing-controls">
+                                                <div class="btn-group-vertical">
+                                                    <button id="addMarkerBtn" class="btn btn-sm btn-outline-primary">Add Marker</button>
+                                                    <button id="addPolygonBtn" class="btn btn-sm btn-outline-secondary">Add Polygon</button>
+                                                    <button id="saveMarkupBtn" class="btn btn-sm btn-success">Save Markups</button>
+                                                </div>
+                                            </div>
+                                            <div class="marker-form" id="markerForm">
+                                                <h6>Marker Details</h6>
+                                                <div class="mb-2">
+                                                    <label class="form-label">Title</label>
+                                                    <input type="text" class="form-control" id="markerTitle">
+                                                </div>
+                                                <div class="mb-2">
+                                                    <label class="form-label">Description</label>
+                                                    <textarea class="form-control" id="markerDescription" rows="2"></textarea>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <label class="form-label">Type</label>
+                                                    <select class="form-select" id="markerType">
+                                                        <option value="observation">Observation</option>
+                                                        <option value="issue">Issue</option>
+                                                        <option value="feature">Feature</option>
+                                                    </select>
+                                                </div>
+                                                <div class="d-flex justify-content-between mt-2">
+                                                    <button class="btn btn-sm btn-secondary" id="cancelMarkerBtn">Cancel</button>
+                                                    <button class="btn btn-sm btn-primary" id="saveMarkerBtn">Save</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -988,6 +1046,8 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
             crossorigin=""></script>
+    <!-- Leaflet.draw JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script>
@@ -1001,6 +1061,8 @@
             activities: JSON.parse(localStorage.getItem('activities')) || [],
             monitoring: JSON.parse(localStorage.getItem('monitoring')) || [],
             reports: JSON.parse(localStorage.getItem('reports')) || [],
+            mapMarkers: JSON.parse(localStorage.getItem('mapMarkers')) || [],
+            mapPolygons: JSON.parse(localStorage.getItem('mapPolygons')) || [],
             complianceChecklist: JSON.parse(localStorage.getItem('complianceChecklist')) || [
                 { id: 1, requirement: "Identified all relevant legislation", compliant: "", evidence: "", notes: "" },
                 { id: 2, requirement: "Assessed impacts on protected matters", compliant: "", evidence: "", notes: "" },
@@ -1028,6 +1090,8 @@
             localStorage.setItem('activities', JSON.stringify(db.activities));
             localStorage.setItem('monitoring', JSON.stringify(db.monitoring));
             localStorage.setItem('reports', JSON.stringify(db.reports));
+            localStorage.setItem('mapMarkers', JSON.stringify(db.mapMarkers));
+            localStorage.setItem('mapPolygons', JSON.stringify(db.mapPolygons));
             localStorage.setItem('complianceChecklist', JSON.stringify(db.complianceChecklist));
             localStorage.setItem('settings', JSON.stringify(db.settings));
         }
@@ -1082,23 +1146,31 @@
             setupEventListeners();
         });
 
-        // Initialize map
+        // Map variables
+        let map;
+        let drawnItems;
+        let currentMarker = null;
+        let currentPolygon = null;
+
+        // Initialize map with drawing capabilities
         function initMap() {
             // Initialize the map with default coordinates
-            window.map = L.map('map').setView([-27.4698, 153.0251], 13); // Default to Brisbane coordinates
+            map = L.map('map').setView([-27.4698, 153.0251], 13); // Default to Brisbane coordinates
 
             // Add OpenStreetMap tiles
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }).addTo(window.map);
+            }).addTo(map);
 
-            // Add a default marker
-            const marker = L.marker([-27.4698, 153.0251]).addTo(window.map)
-                .bindPopup('Default Location')
-                .openPopup();
+            // Initialize the feature group to store editable layers
+            drawnItems = new L.FeatureGroup();
+            map.addLayer(drawnItems);
+
+            // Load saved markers and polygons
+            loadMapMarkups();
 
             // Create layer groups for different map features
-            window.zonesLayer = L.layerGroup([marker]);
+            window.zonesLayer = L.layerGroup();
             window.vegetationLayer = L.layerGroup();
             window.weedsLayer = L.layerGroup();
 
@@ -1112,44 +1184,325 @@
             const overlays = {
                 "Zones": window.zonesLayer,
                 "Vegetation": window.vegetationLayer,
-                "Weeds": window.weedsLayer
+                "Weeds": window.weedsLayer,
+                "Markups": drawnItems
             };
 
-            L.control.layers(baseLayers, overlays, {collapsed: false}).addTo(window.map);
+            L.control.layers(baseLayers, overlays, {collapsed: false}).addTo(map);
 
             // Default to showing zones
-            window.zonesLayer.addTo(window.map);
+            window.zonesLayer.addTo(map);
+        }
 
-            // Button controls for map layers
-            document.getElementById('zoneToggle').addEventListener('click', function() {
-                if (window.map.hasLayer(window.zonesLayer)) {
-                    window.map.removeLayer(window.zonesLayer);
-                    this.classList.remove('active');
-                } else {
-                    window.map.addLayer(window.zonesLayer);
-                    this.classList.add('active');
+        // Load saved map markups
+        function loadMapMarkups() {
+            // Clear existing items
+            drawnItems.clearLayers();
+            
+            // Load markers
+            db.mapMarkers.forEach(markerData => {
+                const marker = L.marker([markerData.lat, markerData.lng], {
+                    title: markerData.title
+                }).addTo(drawnItems);
+                
+                marker.bindPopup(`
+                    <b>${markerData.title}</b><br>
+                    ${markerData.description}<br>
+                    <small>Type: ${markerData.type}</small>
+                `);
+            });
+            
+            // Load polygons
+            db.mapPolygons.forEach(polygonData => {
+                const polygon = L.polygon(polygonData.latlngs, {
+                    color: polygonData.color,
+                    fillOpacity: 0.5
+                }).addTo(drawnItems);
+                
+                polygon.bindPopup(`
+                    <b>${polygonData.title || 'Polygon'}</b><br>
+                    ${polygonData.description || ''}
+                `);
+            });
+        }
+
+        // Save map markups to database
+        function saveMapMarkups() {
+            // Clear existing markups
+            db.mapMarkers = [];
+            db.mapPolygons = [];
+            
+            // Save all drawn items
+            drawnItems.eachLayer(layer => {
+                if (layer instanceof L.Marker) {
+                    db.mapMarkers.push({
+                        lat: layer.getLatLng().lat,
+                        lng: layer.getLatLng().lng,
+                        title: layer.options.title || 'Marker',
+                        description: layer.options.description || '',
+                        type: layer.options.type || 'observation'
+                    });
+                } else if (layer instanceof L.Polygon) {
+                    db.mapPolygons.push({
+                        latlngs: layer.getLatLngs(),
+                        color: layer.options.color || '#3388ff',
+                        title: layer.options.title || 'Polygon',
+                        description: layer.options.description || ''
+                    });
                 }
             });
+            
+            saveData();
+            showToast('Success', 'Map markups saved successfully!');
+        }
 
-            document.getElementById('vegetationToggle').addEventListener('click', function() {
-                if (window.map.hasLayer(window.vegetationLayer)) {
-                    window.map.removeLayer(window.vegetationLayer);
-                    this.classList.remove('active');
-                } else {
-                    window.map.addLayer(window.vegetationLayer);
-                    this.classList.add('active');
+        // Set up event listeners for map interactions
+        function setupMapInteractions() {
+            // Add marker button
+            document.getElementById('addMarkerBtn').addEventListener('click', function() {
+                // Disable any existing drawing modes
+                map.off('click');
+                
+                // Set up click handler for adding markers
+                map.on('click', function(e) {
+                    // Show marker form at clicked position
+                    const markerForm = document.getElementById('markerForm');
+                    markerForm.style.display = 'block';
+                    markerForm.dataset.lat = e.latlng.lat;
+                    markerForm.dataset.lng = e.latlng.lng;
+                    
+                    // Store the click position for the marker
+                    currentMarker = e.latlng;
+                });
+            });
+            
+            // Add polygon button
+            document.getElementById('addPolygonBtn').addEventListener('click', function() {
+                // Disable any existing drawing modes
+                map.off('click');
+                
+                // Initialize polygon drawing
+                currentPolygon = new L.Draw.Polygon(map, {
+                    shapeOptions: {
+                        color: '#3388ff',
+                        fillOpacity: 0.5
+                    }
+                });
+                currentPolygon.enable();
+                
+                // When polygon is completed
+                map.on('draw:created', function(e) {
+                    const type = e.layerType;
+                    const layer = e.layer;
+                    
+                    if (type === 'polygon') {
+                        // Add the polygon to the map
+                        drawnItems.addLayer(layer);
+                        
+                        // Add a popup with basic info
+                        layer.bindPopup('Polygon (click to edit)');
+                        
+                        // Save the polygon to our database
+                        db.mapPolygons.push({
+                            latlngs: layer.getLatLngs(),
+                            color: layer.options.color,
+                            title: 'New Polygon',
+                            description: ''
+                        });
+                        
+                        saveData();
+                        showToast('Success', 'Polygon added!');
+                    }
+                    
+                    // Disable drawing mode
+                    currentPolygon.disable();
+                    currentPolygon = null;
+                });
+            });
+            
+            // Save markups button
+            document.getElementById('saveMarkupBtn').addEventListener('click', saveMapMarkups);
+            
+            // Marker form buttons
+            document.getElementById('saveMarkerBtn').addEventListener('click', function() {
+                const markerForm = document.getElementById('markerForm');
+                const title = document.getElementById('markerTitle').value || 'Marker';
+                const description = document.getElementById('markerDescription').value || '';
+                const type = document.getElementById('markerType').value;
+                
+                // Create the marker
+                const marker = L.marker([currentMarker.lat, currentMarker.lng], {
+                    title: title,
+                    description: description,
+                    type: type
+                }).addTo(drawnItems);
+                
+                // Add a popup
+                marker.bindPopup(`
+                    <b>${title}</b><br>
+                    ${description}<br>
+                    <small>Type: ${type}</small>
+                `);
+                
+                // Save to database
+                db.mapMarkers.push({
+                    lat: currentMarker.lat,
+                    lng: currentMarker.lng,
+                    title: title,
+                    description: description,
+                    type: type
+                });
+                
+                saveData();
+                
+                // Hide the form
+                markerForm.style.display = 'none';
+                currentMarker = null;
+                
+                // Clear form fields
+                document.getElementById('markerTitle').value = '';
+                document.getElementById('markerDescription').value = '';
+                
+                showToast('Success', 'Marker added!');
+            });
+            
+            document.getElementById('cancelMarkerBtn').addEventListener('click', function() {
+                document.getElementById('markerForm').style.display = 'none';
+                currentMarker = null;
+            });
+        }
+
+        // Set up event listeners
+        function setupEventListeners() {
+            // Set up map interactions
+            setupMapInteractions();
+            
+            // Assessment form submission
+            document.getElementById('assessmentForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveAssessment();
+            });
+            
+            // Activity form submission
+            document.getElementById('saveActivity').addEventListener('click', function() {
+                saveActivity();
+            });
+            
+            // Species form submission
+            document.getElementById('saveSpecies').addEventListener('click', function() {
+                saveSpecies();
+            });
+            
+            // Monitoring form submission
+            document.getElementById('saveMonitoring').addEventListener('click', function() {
+                saveMonitoring();
+            });
+            
+            // Generate compliance report
+            document.getElementById('generateComplianceReport').addEventListener('click', function() {
+                generateComplianceReport();
+            });
+            
+            // Generate report button
+            document.getElementById('generateReportBtn').addEventListener('click', function() {
+                generateReportFromModal();
+            });
+            
+            // Species image preview
+            document.getElementById('speciesImage').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const preview = document.getElementById('speciesImagePreview');
+                        preview.src = event.target.result;
+                        preview.style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
                 }
             });
-
-            document.getElementById('weedsToggle').addEventListener('click', function() {
-                if (window.map.hasLayer(window.weedsLayer)) {
-                    window.map.removeLayer(window.weedsLayer);
-                    this.classList.remove('active');
-                } else {
-                    window.map.addLayer(window.weedsLayer);
-                    this.classList.add('active');
+            
+            // Assessment photo preview
+            document.getElementById('assessmentPhotos').addEventListener('change', function(e) {
+                const files = e.target.files;
+                const previewContainer = document.getElementById('assessmentPhotoPreview');
+                previewContainer.innerHTML = '';
+                
+                if (files.length > 0) {
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        if (file.type.match('image.*')) {
+                            const reader = new FileReader();
+                            reader.onload = function(event) {
+                                const img = document.createElement('img');
+                                img.src = event.target.result;
+                                img.className = 'image-thumbnail';
+                                previewContainer.appendChild(img);
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    }
                 }
             });
+            
+            // Monitoring photo preview
+            document.getElementById('monitoringPhotos').addEventListener('change', function(e) {
+                const files = e.target.files;
+                const previewContainer = document.getElementById('monitoringPhotoPreview');
+                previewContainer.innerHTML = '';
+                
+                if (files.length > 0) {
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        if (file.type.match('image.*')) {
+                            const reader = new FileReader();
+                            reader.onload = function(event) {
+                                const img = document.createElement('img');
+                                img.src = event.target.result;
+                                img.className = 'image-thumbnail';
+                                previewContainer.appendChild(img);
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    }
+                }
+            });
+            
+            // Tab change events to refresh data
+            const tabLinks = document.querySelectorAll('.nav-link[data-bs-toggle="tab"]');
+            tabLinks.forEach(link => {
+                link.addEventListener('shown.bs.tab', function(e) {
+                    const target = e.target.getAttribute('href');
+                    if (target === '#dashboard') {
+                        loadDashboard();
+                    } else if (target === '#site-assessment') {
+                        loadAssessments();
+                    } else if (target === '#maintenance-plan') {
+                        loadActivities();
+                    } else if (target === '#species-register') {
+                        loadSpecies();
+                    } else if (target === '#monitoring') {
+                        loadMonitoring();
+                    } else if (target === '#reports') {
+                        loadReports();
+                    }
+                });
+            });
+            
+            // Validate components selection
+            const componentCheckboxes = document.querySelectorAll('input[name="components"]');
+            componentCheckboxes.forEach(checkbox => {
+                checkbox.addEventListener('change', function() {
+                    validateComponents();
+                });
+            });
+            
+            // PDF export buttons
+            document.getElementById('printAssessment').addEventListener('click', exportToPDF);
+            document.getElementById('printSpeciesDetails').addEventListener('click', exportToPDF);
+            document.getElementById('printActivity').addEventListener('click', exportToPDF);
+            document.getElementById('printMonitoring').addEventListener('click', exportToPDF);
+            document.getElementById('downloadReport').addEventListener('click', exportToPDF);
         }
 
         // Load dashboard data
@@ -1518,136 +1871,6 @@
                     </td>
                 `;
             });
-        }
-
-        // Set up event listeners
-        function setupEventListeners() {
-            // Assessment form submission
-            document.getElementById('assessmentForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                saveAssessment();
-            });
-            
-            // Activity form submission
-            document.getElementById('saveActivity').addEventListener('click', function() {
-                saveActivity();
-            });
-            
-            // Species form submission
-            document.getElementById('saveSpecies').addEventListener('click', function() {
-                saveSpecies();
-            });
-            
-            // Monitoring form submission
-            document.getElementById('saveMonitoring').addEventListener('click', function() {
-                saveMonitoring();
-            });
-            
-            // Generate compliance report
-            document.getElementById('generateComplianceReport').addEventListener('click', function() {
-                generateComplianceReport();
-            });
-            
-            // Generate report button
-            document.getElementById('generateReportBtn').addEventListener('click', function() {
-                generateReportFromModal();
-            });
-            
-            // Species image preview
-            document.getElementById('speciesImage').addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(event) {
-                        const preview = document.getElementById('speciesImagePreview');
-                        preview.src = event.target.result;
-                        preview.style.display = 'block';
-                    };
-                    reader.readAsDataURL(file);
-                }
-            });
-            
-            // Assessment photo preview
-            document.getElementById('assessmentPhotos').addEventListener('change', function(e) {
-                const files = e.target.files;
-                const previewContainer = document.getElementById('assessmentPhotoPreview');
-                previewContainer.innerHTML = '';
-                
-                if (files.length > 0) {
-                    for (let i = 0; i < files.length; i++) {
-                        const file = files[i];
-                        if (file.type.match('image.*')) {
-                            const reader = new FileReader();
-                            reader.onload = function(event) {
-                                const img = document.createElement('img');
-                                img.src = event.target.result;
-                                img.className = 'image-thumbnail';
-                                previewContainer.appendChild(img);
-                            };
-                            reader.readAsDataURL(file);
-                        }
-                    }
-                }
-            });
-            
-            // Monitoring photo preview
-            document.getElementById('monitoringPhotos').addEventListener('change', function(e) {
-                const files = e.target.files;
-                const previewContainer = document.getElementById('monitoringPhotoPreview');
-                previewContainer.innerHTML = '';
-                
-                if (files.length > 0) {
-                    for (let i = 0; i < files.length; i++) {
-                        const file = files[i];
-                        if (file.type.match('image.*')) {
-                            const reader = new FileReader();
-                            reader.onload = function(event) {
-                                const img = document.createElement('img');
-                                img.src = event.target.result;
-                                img.className = 'image-thumbnail';
-                                previewContainer.appendChild(img);
-                            };
-                            reader.readAsDataURL(file);
-                        }
-                    }
-                }
-            });
-            
-            // Tab change events to refresh data
-            const tabLinks = document.querySelectorAll('.nav-link[data-bs-toggle="tab"]');
-            tabLinks.forEach(link => {
-                link.addEventListener('shown.bs.tab', function(e) {
-                    const target = e.target.getAttribute('href');
-                    if (target === '#dashboard') {
-                        loadDashboard();
-                    } else if (target === '#site-assessment') {
-                        loadAssessments();
-                    } else if (target === '#maintenance-plan') {
-                        loadActivities();
-                    } else if (target === '#species-register') {
-                        loadSpecies();
-                    } else if (target === '#monitoring') {
-                        loadMonitoring();
-                    } else if (target === '#reports') {
-                        loadReports();
-                    }
-                });
-            });
-            
-            // Validate components selection
-            const componentCheckboxes = document.querySelectorAll('input[name="components"]');
-            componentCheckboxes.forEach(checkbox => {
-                checkbox.addEventListener('change', function() {
-                    validateComponents();
-                });
-            });
-            
-            // PDF export buttons
-            document.getElementById('printAssessment').addEventListener('click', exportToPDF);
-            document.getElementById('printSpeciesDetails').addEventListener('click', exportToPDF);
-            document.getElementById('printActivity').addEventListener('click', exportToPDF);
-            document.getElementById('printMonitoring').addEventListener('click', exportToPDF);
-            document.getElementById('downloadReport').addEventListener('click', exportToPDF);
         }
 
         // Save assessment
